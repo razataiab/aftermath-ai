@@ -1,1 +1,1 @@
-# aftermath
+# Aftermath AI
