@@ -4,7 +4,7 @@ from slack_sdk.signature import SignatureVerifier
 from fastapi.responses import JSONResponse
 import requests
 from urllib.parse import parse_qs
-from config import settings
+from src.app.core.config import settings
 
 verifier = SignatureVerifier(settings.SLACK_SIGNING_SECRET)
 router = APIRouter()
@@ -51,12 +51,6 @@ async def retrieve_slack_chat_history(channel_id: str):
     response = client.conversations_history(channel=channel_id)
 
     conversation_history = response["messages"]
-
-    for msg in conversation_history:
-        user = msg.get("user")
-        username = await retrieve_slack_user_name(user)
-        text = msg.get("text")
-        print(f"{username}: {text}")
     
     return conversation_history
 

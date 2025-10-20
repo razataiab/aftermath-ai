@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from slack_sdk.signature import SignatureVerifier
 import uvicorn
-from config import settings
+from src.app.core.config import settings
 from api import slack
 from api.slack import verify_slack_signature, handle_slash_command
 
