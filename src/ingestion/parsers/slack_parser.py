@@ -1,3 +1,4 @@
+from typing import List
 from urllib.parse import parse_qs
 
 def parse_slash_payload(body: bytes):

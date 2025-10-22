@@ -1,6 +1,6 @@
-from datetime import datetime
+from pydantic import BaseModel
 from typing import List
-from pydantic import BaseModel, Field
+from datetime import datetime
 
 class Message(BaseModel):
     user_id: str
@@ -8,14 +8,10 @@ class Message(BaseModel):
     text: str
     timestamp: datetime
 
-class Conversation(BaseModel):
-    channel_id: str
-    channel_name: str
-    messages: List[Message]
-
-class PostmortemRun(BaseModel):
+class Incident(BaseModel):         
     incident_id: str
     channel_id: str
-    run_id: str
-    run_timestamp: datetime
-    invoked_by: str
+    triggered_by_user_id: str
+    triggered_by_user_name: str
+    channel_name: str
+    conversation: List[Message]
