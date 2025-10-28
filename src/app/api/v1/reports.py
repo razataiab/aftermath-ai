@@ -25,6 +25,8 @@ from src.ingestion.connectors.teams_connector import (
     retrieve_teams_user_name,
     send_teams_message,
 )
+from src.ingestion.connectors.github_connector import get_latest_github_action_logs
+from src.ingestion.connectors.jenkins_connector import get_latest_jenkins_build_log
 from src.llm.pipeline import PostmortemAgent
 
 router = APIRouter()
@@ -41,6 +43,26 @@ async def generate_and_send_postmortem(incident: Incident):
         await send_teams_message(incident.channel_id, f"**Postmortem for incident `{incident.incident_id}`**\n\n{postmortem}")
     else:
         print("Unknown incident source; no outbound message sent.")
+
+async def fetch_all_deployment_logs() -> Optional[str]:
+    log_parts = []
+    
+    print("Fetching deployment logs...")
+    github_logs = await get_latest_github_action_logs()
+    if github_logs:
+        print(f"Successfully fetched {len(github_logs)} chars from GitHub.")
+        log_parts.append(f"--- GITHUB ACTION LOGS ---\n{github_logs}")
+
+    jenkins_logs = await get_latest_jenkins_build_log()
+    if jenkins_logs:
+        print(f"Successfully fetched {len(jenkins_logs)} chars from Jenkins.")
+        log_parts.append(f"--- JENKINS BUILD LOGS ---\n{jenkins_logs}")
+
+    if not log_parts:
+        print("No deployment logs fetched.")
+        return None
+        
+    return "\n\n".join(log_parts)
 
 @router.post("/slack")
 async def handle_slack_command(request: Request, background_tasks: BackgroundTasks):
@@ -65,6 +87,8 @@ async def handle_slack_command(request: Request, background_tasks: BackgroundTas
                 source="slack"
             )
         )
+    
+    deployment_logs = await fetch_all_deployment_logs()
 
     incident = Incident(
         incident_id=str(uuid.uuid4()),
@@ -73,12 +97,13 @@ async def handle_slack_command(request: Request, background_tasks: BackgroundTas
         triggered_by_user_name=user_name,
         channel_name=channel_name,
         conversation=conversation,
+        deployment_logs=deployment_logs,
         source="slack",
         trigger_platform="slack_slash"
     )
 
     background_tasks.add_task(generate_and_send_postmortem, incident)
-    return PlainTextResponse("Generating postmortem...", status_code=200)
+    return PlainTextResponse("Generating postmortem (including deployment logs)...", status_code=200)
 
 @router.post("/discord")
 async def handle_discord_interaction(request: Request, background_tasks: BackgroundTasks):
@@ -107,6 +132,8 @@ async def handle_discord_interaction(request: Request, background_tasks: Backgro
             )
         )
 
+    deployment_logs = await fetch_all_deployment_logs()
+
     incident = Incident(
         incident_id=str(uuid.uuid4()),
         channel_id=channel_id,
@@ -114,23 +141,16 @@ async def handle_discord_interaction(request: Request, background_tasks: Backgro
         triggered_by_user_name=user_name,
         channel_name=channel_name,
         conversation=conversation,
+        deployment_logs=deployment_logs,
         source="discord",
         trigger_platform=parsed.get("trigger_platform", "discord_interaction")
     )
 
     background_tasks.add_task(generate_and_send_postmortem, incident)
-    return JSONResponse({"type": 200, "message": "Postmortem generation started."})
+    return JSONResponse({"type": 200, "message": "Postmortem generation (including deployment logs) started."})
 
 @router.post("/teams")
 async def handle_teams_trigger(request: Request, background_tasks: BackgroundTasks):
-    """
-    Endpoint that accepts triggers from multiple Platforms:
-      - teams:channel_message (Graph webhook)
-      - teams:incoming_webhook
-      - teams:adaptive_card (action)
-      - power_automate
-    The payload should include enough context (channelId or conversationId). Parsers attempt to normalize common Teams payloads.
-    """
     body: bytes = await request.body()
     json_payload = await request.json()
 
@@ -156,6 +176,8 @@ async def handle_teams_trigger(request: Request, background_tasks: BackgroundTas
             )
         )
 
+    deployment_logs = await fetch_all_deployment_logs()
+
     incident = Incident(
         incident_id=str(uuid.uuid4()),
         channel_id=channel_id,
@@ -163,6 +185,7 @@ async def handle_teams_trigger(request: Request, background_tasks: BackgroundTas
         triggered_by_user_name=user_name,
         channel_name=channel_name,
         conversation=conversation,
+        deployment_logs=deployment_logs,
         source="teams",
         trigger_platform=trigger_platform
     )

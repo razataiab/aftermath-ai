@@ -18,3 +18,4 @@ class Incident(BaseModel):
     conversation: List[Message]
     source: Optional[str] = "slack"
     trigger_platform: Optional[str] = None
+    deployment_logs: Optional[str] = None

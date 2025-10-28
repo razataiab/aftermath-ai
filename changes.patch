@@ -1,674 +1,972 @@
 diff --git a/changes.patch b/changes.patch
-index fb320fb..e69de29 100644
+index 0c64f42..e69de29 100644
 --- a/changes.patch
 +++ b/changes.patch
-@@ -1,285 +0,0 @@
+@@ -1,674 +0,0 @@
+-diff --git a/changes.patch b/changes.patch
+-index fb320fb..e69de29 100644
+---- a/changes.patch
+-+++ b/changes.patch
+-@@ -1,285 +0,0 @@
+--diff --git a/src/app/core/config.py b/src/app/core/config.py
+--index 8d665e2..fc12539 100644
+----- a/src/app/core/config.py
+--+++ b/src/app/core/config.py
+--@@ -3,11 +3,11 @@ from pydantic_settings import BaseSettings
+-- class Settings(BaseSettings):
+--     SLACK_TOKEN: str
+--     SLACK_SIGNING_SECRET: str
+---    # OPENAI_API_KEY: str
+--+    OPENAI_API_KEY: str
+--     CORS_ORIGINS: list[str] = ["*"]
+--     ENV: str = "development"
+-- 
+--     class Config:
+---        env_file = "../.env"
+--+        env_file = ".env"
+-- 
+-- settings = Settings()
+--diff --git a/src/app/core/models.py b/src/app/core/models.py
+--index f14fc95..453ef36 100644
+----- a/src/app/core/models.py
+--+++ b/src/app/core/models.py
+--@@ -1,6 +1,6 @@
+---from datetime import datetime
+--+from pydantic import BaseModel
+-- from typing import List
+---from pydantic import BaseModel, Field
+--+from datetime import datetime
+-- 
+-- class Message(BaseModel):
+--     user_id: str
+--@@ -8,14 +8,10 @@ class Message(BaseModel):
+--     text: str
+--     timestamp: datetime
+-- 
+---class Conversation(BaseModel):
+---    channel_id: str
+---    channel_name: str
+---    messages: List[Message]
+---
+---class PostmortemRun(BaseModel):
+--+class Incident(BaseModel):         
+--     incident_id: str
+--     channel_id: str
+---    run_id: str
+---    run_timestamp: datetime
+---    invoked_by: str
+--+    triggered_by_user_id: str
+--+    triggered_by_user_name: str
+--+    channel_name: str
+--+    conversation: List[Message]
+--\ No newline at end of file
+--diff --git a/src/app/main.py b/src/app/main.py
+--index ce821a5..f944f8f 100644
+----- a/src/app/main.py
+--+++ b/src/app/main.py
+--@@ -4,8 +4,7 @@ from fastapi.responses import JSONResponse
+-- from slack_sdk.signature import SignatureVerifier
+-- import uvicorn
+-- from src.app.core.config import settings
+---from api import slack
+---from api.slack import verify_slack_signature, handle_slash_command
+--+from src.app.api.v1.reports import router as slack_router
+-- 
+-- verifier = SignatureVerifier(settings.SLACK_SIGNING_SECRET)
+-- 
+--@@ -28,11 +27,12 @@ def create_app() -> FastAPI:
+--     async def health():
+--         return {"status": "ok"}
+--     
+---    app.include_router(slack.router, prefix="", tags=["Slack Integration"])
+--+    app.include_router(slack_router, prefix="/api/v1", tags=["Slack Integration"])
+-- 
+--     return app
+-- 
+--+app = create_app()
+--+
+-- if __name__ == "__main__":
+---    app = create_app()
+--     print("Starting local server at http://127.0.0.1:8000")
+--     uvicorn.run(app, host="0.0.0.0", port=8000, reload=False)
+--\ No newline at end of file
+--diff --git a/src/ingestion/connectors/slack_connector.py b/src/ingestion/connectors/slack_connector.py
+--index 5765c53..0400da2 100644
+----- a/src/ingestion/connectors/slack_connector.py
+--+++ b/src/ingestion/connectors/slack_connector.py
+--@@ -9,11 +9,9 @@ verifier = SignatureVerifier(settings.SLACK_SIGNING_SECRET)
+-- def verify_slack_signature(request: Request, body: bytes):
+--     timestamp = request.headers.get("X-Slack-Request-Timestamp")
+--     signature = request.headers.get("X-Slack-Signature")
+---    print("Verifying signature:")
+--     verified = verifier.is_valid(body, timestamp, signature)
+--     if not verified:
+---        print("Signature verification failed!")
+---    print("Signature verified successfully!")
+--+        print("Signature verification failed: Invalid signature")
+-- 
+-- async def retrieve_slack_chat_history(channel_id: str):
+--     response = client.conversations_history(channel=channel_id)
+--@@ -25,3 +23,15 @@ async def retrieve_slack_user_name(user_id: str):
+-- 
+-- async def send_slack_message(channel_id: str, message: str):
+--     client.chat_postMessage(channel=channel_id, text=message)
+--+
+--+# async def get_channel_id(body: bytes):
+--+#     payload = slack_parser.parse_slash_payload(body)
+--+#     return payload.get("channel_id")
+--+
+--+# async def get_user_id(body: bytes):
+--+#     payload = slack_parser.parse_slash_payload(body)
+--+#     return payload.get("user_id")
+--+
+--+# async def get_channel_name(body: bytes):
+--+#     payload = slack_parser.parse_slash_payload(body)
+--+#     return payload.get("channel_name")
+--\ No newline at end of file
+--diff --git a/src/ingestion/parsers/slack_parser.py b/src/ingestion/parsers/slack_parser.py
+--index 607057c..f408ceb 100644
+----- a/src/ingestion/parsers/slack_parser.py
+--+++ b/src/ingestion/parsers/slack_parser.py
+--@@ -1,3 +1,4 @@
+--+from typing import List
+-- from urllib.parse import parse_qs
+-- 
+-- def parse_slash_payload(body: bytes):
+--diff --git a/src/llm/__init__.py b/src/llm/__init__.py
+--index 6dd0c19..e3ad45a 100644
+----- a/src/llm/__init__.py
+--+++ b/src/llm/__init__.py
+--@@ -1 +1 @@
+---from .pipeline import generate_postmortem
+--+# from .pipeline import generate_postmortem
+--diff --git a/src/llm/pipeline.py b/src/llm/pipeline.py
+--index f3e2cd5..0bdcac8 100644
+----- a/src/llm/pipeline.py
+--+++ b/src/llm/pipeline.py
+--@@ -1,20 +1,26 @@
+-- from typing import List, Optional
+---from langchain.chat_models import ChatOpenAI
+--+from langchain_community.chat_models import ChatOpenAI
+-- from langchain.schema import AIMessage, HumanMessage, SystemMessage
+-- from langchain.tools import Tool
+-- from langchain.agents import initialize_agent, AgentType
+---import asyncio
+-- 
+---from src.ingestion.connectors.slack_connector import retrieve_slack_chat_history, retrieve_slack_user_name
+--+from src.app.core.config import settings
+--+from src.app.core.models import Incident
+--+
+--+OPENAI_API_KEY = settings.OPENAI_API_KEY
+-- 
+-- class ModelClient:
+--     def __init__(self, provider: str = "openai", model_name: str = "gpt-5-postmortem"):
+--         self.provider = provider
+--         self.model_name = model_name
+---        self.client = ChatOpenAI(model=model_name, temperature=0.3)
+--+        self.client = ChatOpenAI(
+--+            model=model_name,
+--+            temperature=0.3,
+--+            openai_api_key=OPENAI_API_KEY
+--+        )
+-- 
+--     @classmethod
+---    def select(cls, provider: str = "openai", model_name: str = "gpt-5-postmortem") -> "ModelClient":
+--+    def select(cls, provider: str = "openai", model_name: str = "gpt-4o") -> "ModelClient":
+--         return cls(provider, model_name)
+-- 
+--     def generate(self, messages: List[dict]) -> str:
+--@@ -27,16 +33,19 @@ class ModelClient:
+--         response = self.client(lc_msgs)
+--         return response.content
+-- 
+--+
+-- POSTMORTEM_TEMPLATE = """
+-- You are a senior SRE generating an incident postmortem.
+--+
+-- Context:
+-- {{context}}
+-- 
+-- Instructions:
+-- - Deliver a structured postmortem with clear root cause
+---- Timeline must be explicit
+---- No filler phrases
+---- Cite sources (slack/github/deploy-log) inline
+--+- Timeline must be explicit (chronological)
+--+- No filler language
+--+- Cite message sources inline using user_id
+--+- Everything MUST come from the provided incident context
+-- 
+-- Output format:
+-- 1. Summary
+--@@ -45,41 +54,58 @@ Output format:
+-- 4. Root Cause
+-- 5. Remediations
+-- 6. Follow-ups
+---"""
+--+""".strip()
+--+
+-- 
+-- class AgentState(dict):
+--     def __init__(self, **kwargs):
+--         super().__init__(**kwargs)
+---        self.setdefault("context", {})
+--+        self.setdefault("incident", None)
+--         self.setdefault("postmortem", None)
+--+        self.setdefault("valid", False)
+--+
+--+
+--+def build_slack_context(incident: Incident) -> str:
+--+    """Format the Slack conversation as `user_id: message` per line."""
+--+    lines = []
+--+    for msg in incident.conversation:
+--+        # No username here — exactly what you asked for
+--+        lines.append(f"{msg.user_id}: {msg.text}")
+--+    return "\n".join(lines)
+--+
+--+
+--+def slack_tool_func(state: AgentState) -> str:
+--+    """Actual implementation of Slack tool that reads from Incident."""
+--+    incident: Incident = state["incident"]
+--+    return build_slack_context(incident)
+-- 
+---def fetch_slack_context(incident_id: str) -> str:
+---    return f"Slack discussion snippet for {incident_id}"
+-- 
+-- slack_tool = Tool(
+---    name="Slack",
+---    func=fetch_slack_context,
+---    description="Fetch relevant Slack messages for an incident"
+--+    name="SlackContext",
+--+    func=lambda incident_id_or_state: slack_tool_func(incident_id_or_state),
+--+    description="Returns previously ingested Slack messages for this incident.",
+-- )
+-- 
+-- TOOLS = [slack_tool]
+-- 
+--+
+-- def synthesize_postmortem(state: AgentState, model: ModelClient):
+--     llm_agent = initialize_agent(
+--         tools=TOOLS,
+--         llm=model.client,
+---        agent=AgentType.CHAT_CONVERSATIONAL_REACT_DESCRIPTION,
+--+        agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
+--         verbose=False
+--     )
+-- 
+---    prompt = POSTMORTEM_TEMPLATE.replace(
+---        "{{context}}",
+---        f"Incident ID: {state.get('incident_id')}\nPlease fetch Slack/GitHub/deploy logs as needed."
+---    )
+--+    incident: Incident = state["incident"]
+--+    context = build_slack_context(incident)
+--+
+--+    prompt = POSTMORTEM_TEMPLATE.replace("{{context}}", context)
+-- 
+--     state["postmortem"] = llm_agent.run(prompt)
+--     return state
+-- 
+--+
+-- def validate_postmortem(state: AgentState, model: ModelClient):
+--     check_query = f"Is the following postmortem complete and properly formatted? Respond YES or NO.\n\n{state['postmortem']}"
+--     res = model.generate([
+--@@ -89,18 +115,20 @@ def validate_postmortem(state: AgentState, model: ModelClient):
+--     state["valid"] = "YES" in res.upper()
+--     return state
+-- 
+--+
+-- class PostmortemAgent:
+--     def __init__(self, model_client: Optional[ModelClient] = None):
+--         self.model = model_client or ModelClient.select()
+-- 
+---    def run(self, incident_id: str, initial_context: dict) -> str:
+---        state = AgentState(incident_id=incident_id, context=initial_context)
+--+    def run(self, incident: Incident) -> str:
+--+        state = AgentState(incident=incident)
+-- 
+--         state = synthesize_postmortem(state, self.model)
+--         state = validate_postmortem(state, self.model)
+-- 
+--         return state.get("postmortem", "No output generated.")
+-- 
+--+
+-- __all__ = [
+--     "ModelClient",
+--     "PostmortemAgent",
+-diff --git a/src/app/api/v1/reports.py b/src/app/api/v1/reports.py
+-index 71779b9..143464b 100644
+---- a/src/app/api/v1/reports.py
+-+++ b/src/app/api/v1/reports.py
+-@@ -1,18 +1,29 @@
+- from datetime import datetime
+- from typing import List, Optional
+--import asyncio
+- import uuid
+- 
+- from fastapi import APIRouter, Request, BackgroundTasks
+--from fastapi.responses import PlainTextResponse
+-+from fastapi.responses import PlainTextResponse, JSONResponse
+- 
+- from src.app.core.models import Incident, Message
+--from src.ingestion.parsers import slack_parser
+-+from src.ingestion.parsers import slack_parser, discord_parser, teams_parser
+- from src.ingestion.connectors.slack_connector import (
+--    verify_slack_signature, 
+--    send_slack_message, 
+--    retrieve_slack_chat_history, 
+--    retrieve_slack_user_name
+-+    verify_slack_signature,
+-+    retrieve_slack_chat_history,
+-+    retrieve_slack_user_name,
+-+    send_slack_message,
+-+)
+-+from src.ingestion.connectors.discord_connector import (
+-+    verify_discord_signature,
+-+    retrieve_discord_chat_history,
+-+    retrieve_discord_user_name,
+-+    send_discord_message,
+-+)
+-+from src.ingestion.connectors.teams_connector import (
+-+    verify_teams_request,
+-+    retrieve_teams_chat_history,
+-+    retrieve_teams_user_name,
+-+    send_teams_message,
+- )
+- from src.llm.pipeline import PostmortemAgent
+- 
+-@@ -22,15 +33,18 @@ async def generate_and_send_postmortem(incident: Incident):
+-     agent = PostmortemAgent()
+-     postmortem = agent.run(incident)
+- 
+--    await send_slack_message(
+--        incident.channel_id, 
+--        f"*Postmortem for incident `{incident.incident_id}`:*\n\n{postmortem}"
+--    )
+-+    if incident.source == "slack":
+-+        await send_slack_message(incident.channel_id, f"*Postmortem for incident `{incident.incident_id}`:*\n\n{postmortem}")
+-+    elif incident.source == "discord":
+-+        await send_discord_message(incident.channel_id, f"**Postmortem for incident `{incident.incident_id}`**\n\n{postmortem}")
+-+    elif incident.source == "teams":
+-+        await send_teams_message(incident.channel_id, f"**Postmortem for incident `{incident.incident_id}`**\n\n{postmortem}")
+-+    else:
+-+        print("Unknown incident source; no outbound message sent.")
+- 
+- @router.post("/slack")
+- async def handle_slack_command(request: Request, background_tasks: BackgroundTasks):
+-     body: bytes = await request.body()
+--
+-     verify_slack_signature(request, body)
+-     payload = slack_parser.parse_slash_payload(body)
+- 
+-@@ -44,10 +58,11 @@ async def handle_slack_command(request: Request, background_tasks: BackgroundTas
+-     for msg in messages:
+-         conversation.append(
+-             Message(
+--                user_id=msg["user"],
+--                username=await retrieve_slack_user_name(user_id) or "Unknown",
+--                text=msg["text"],
+--                timestamp=datetime.fromtimestamp(float(msg["ts"]))
+-+                user_id=msg.get("user","unknown"),
+-+                username=await retrieve_slack_user_name(msg.get("user")) or "Unknown",
+-+                text=msg.get("text",""),
+-+                timestamp=datetime.fromtimestamp(float(msg.get("ts", 0))),
+-+                source="slack"
+-             )
+-         )
+- 
+-@@ -57,9 +72,100 @@ async def handle_slack_command(request: Request, background_tasks: BackgroundTas
+-         triggered_by_user_id=user_id,
+-         triggered_by_user_name=user_name,
+-         channel_name=channel_name,
+--        conversation=conversation
+-+        conversation=conversation,
+-+        source="slack",
+-+        trigger_platform="slack_slash"
+-     )
+- 
+-     background_tasks.add_task(generate_and_send_postmortem, incident)
+-+    return PlainTextResponse("Generating postmortem...", status_code=200)
+-+
+-+@router.post("/discord")
+-+async def handle_discord_interaction(request: Request, background_tasks: BackgroundTasks):
+-+    body: bytes = await request.body()
+-+
+-+    verify_discord_signature(request, body)
+-+
+-+    payload = await request.json()
+-+    parsed = discord_parser.parse_interaction_payload(payload)
+-+
+-+    channel_id = parsed.get("channel_id")
+-+    user_id = parsed.get("user_id")
+-+    user_name = await retrieve_discord_user_name(user_id)
+-+    channel_name = parsed.get("channel_name")
+-+
+-+    messages = await retrieve_discord_chat_history(channel_id)
+-+    conversation: List[Message] = []
+-+    for msg in messages:
+-+        conversation.append(
+-+            Message(
+-+                user_id=msg.get("author", {}).get("id", "unknown"),
+-+                username=msg.get("author", {}).get("username") or "Unknown",
+-+                text=msg.get("content", ""),
+-+                timestamp=datetime.fromtimestamp(float(msg.get("timestamp", datetime.utcnow().timestamp()))),
+-+                source="discord"
+-+            )
+-+        )
+- 
+-+    incident = Incident(
+-+        incident_id=str(uuid.uuid4()),
+-+        channel_id=channel_id,
+-+        triggered_by_user_id=user_id,
+-+        triggered_by_user_name=user_name,
+-+        channel_name=channel_name,
+-+        conversation=conversation,
+-+        source="discord",
+-+        trigger_platform=parsed.get("trigger_platform", "discord_interaction")
+-+    )
+-+
+-+    background_tasks.add_task(generate_and_send_postmortem, incident)
+-+    return JSONResponse({"type": 200, "message": "Postmortem generation started."})
+-+
+-+@router.post("/teams")
+-+async def handle_teams_trigger(request: Request, background_tasks: BackgroundTasks):
+-+    """
+-+    Endpoint that accepts triggers from multiple Platforms:
+-+      - teams:channel_message (Graph webhook)
+-+      - teams:incoming_webhook
+-+      - teams:adaptive_card (action)
+-+      - power_automate
+-+    The payload should include enough context (channelId or conversationId). Parsers attempt to normalize common Teams payloads.
+-+    """
+-+    body: bytes = await request.body()
+-+    json_payload = await request.json()
+-+
+-+    verify_teams_request(request, body)
+-+
+-+    parsed = teams_parser.parse_trigger_payload(json_payload)
+-+    channel_id = parsed.get("channel_id")
+-+    user_id = parsed.get("user_id")
+-+    user_name = await retrieve_teams_user_name(user_id)
+-+    channel_name = parsed.get("channel_name")
+-+    trigger_platform = parsed.get("trigger_platform", "teams_webhook")
+-+
+-+    messages = await retrieve_teams_chat_history(channel_id)
+-+    conversation: List[Message] = []
+-+    for msg in messages:
+-+        conversation.append(
+-+            Message(
+-+                user_id=msg.get("from", {}).get("user", {}).get("id", "unknown"),
+-+                username=msg.get("from", {}).get("user", {}).get("displayName") or "Unknown",
+-+                text=msg.get("body", {}).get("content", ""),
+-+                timestamp=datetime.fromtimestamp(float(msg.get("createdDateTime", datetime.utcnow().timestamp()))),
+-+                source="teams"
+-+            )
+-+        )
+-+
+-+    incident = Incident(
+-+        incident_id=str(uuid.uuid4()),
+-+        channel_id=channel_id,
+-+        triggered_by_user_id=user_id,
+-+        triggered_by_user_name=user_name,
+-+        channel_name=channel_name,
+-+        conversation=conversation,
+-+        source="teams",
+-+        trigger_platform=trigger_platform
+-+    )
+-+
+-+    background_tasks.add_task(generate_and_send_postmortem, incident)
+-     return PlainTextResponse("Generating postmortem...", status_code=200)
 -diff --git a/src/app/core/config.py b/src/app/core/config.py
--index 8d665e2..fc12539 100644
+-index fc12539..fd56c02 100644
 ---- a/src/app/core/config.py
 -+++ b/src/app/core/config.py
--@@ -3,11 +3,11 @@ from pydantic_settings import BaseSettings
-- class Settings(BaseSettings):
--     SLACK_TOKEN: str
--     SLACK_SIGNING_SECRET: str
---    # OPENAI_API_KEY: str
--+    OPENAI_API_KEY: str
+-@@ -7,6 +7,12 @@ class Settings(BaseSettings):
 -     CORS_ORIGINS: list[str] = ["*"]
 -     ENV: str = "development"
 - 
+-+    DISCORD_TOKEN: str
+-+    DISCORD_PUBLIC_KEY: str
+-+    TEAMS_CLIENT_ID: str
+-+    TEAMS_CLIENT_SECRET: str
+-+    TEAMS_TENANT_ID: str
+-+    TEAMS_GRAPH_TOKEN: str
 -     class Config:
---        env_file = "../.env"
--+        env_file = ".env"
+-         env_file = ".env"
 - 
-- settings = Settings()
 -diff --git a/src/app/core/models.py b/src/app/core/models.py
--index f14fc95..453ef36 100644
+-index 453ef36..d8613ee 100644
 ---- a/src/app/core/models.py
 -+++ b/src/app/core/models.py
--@@ -1,6 +1,6 @@
---from datetime import datetime
--+from pydantic import BaseModel
-- from typing import List
---from pydantic import BaseModel, Field
--+from datetime import datetime
+-@@ -1,5 +1,5 @@
+- from pydantic import BaseModel
+--from typing import List
+-+from typing import List, Optional
+- from datetime import datetime
 - 
 - class Message(BaseModel):
--     user_id: str
--@@ -8,14 +8,10 @@ class Message(BaseModel):
+-@@ -7,11 +7,14 @@ class Message(BaseModel):
+-     username: str
 -     text: str
 -     timestamp: datetime
+-+    source: Optional[str] = None
 - 
---class Conversation(BaseModel):
---    channel_id: str
---    channel_name: str
---    messages: List[Message]
---
---class PostmortemRun(BaseModel):
--+class Incident(BaseModel):         
+--class Incident(BaseModel):         
+-+class Incident(BaseModel):
 -     incident_id: str
 -     channel_id: str
---    run_id: str
---    run_timestamp: datetime
---    invoked_by: str
--+    triggered_by_user_id: str
--+    triggered_by_user_name: str
--+    channel_name: str
--+    conversation: List[Message]
+-     triggered_by_user_id: str
+-     triggered_by_user_name: str
+-     channel_name: str
+--    conversation: List[Message]
 -\ No newline at end of file
+-+    conversation: List[Message]
+-+    source: Optional[str] = "slack"
+-+    trigger_platform: Optional[str] = None
 -diff --git a/src/app/main.py b/src/app/main.py
--index ce821a5..f944f8f 100644
+-index f944f8f..da2d36a 100644
 ---- a/src/app/main.py
 -+++ b/src/app/main.py
--@@ -4,8 +4,7 @@ from fastapi.responses import JSONResponse
-- from slack_sdk.signature import SignatureVerifier
+-@@ -1,18 +1,15 @@
+--from fastapi import FastAPI, Request, BackgroundTasks, HTTPException
+-+from fastapi import FastAPI
+- from fastapi.middleware.cors import CORSMiddleware
+--from fastapi.responses import JSONResponse
+--from slack_sdk.signature import SignatureVerifier
 - import uvicorn
-- from src.app.core.config import settings
---from api import slack
---from api.slack import verify_slack_signature, handle_slash_command
--+from src.app.api.v1.reports import router as slack_router
+--from src.app.core.config import settings
+--from src.app.api.v1.reports import router as slack_router
 - 
-- verifier = SignatureVerifier(settings.SLACK_SIGNING_SECRET)
+--verifier = SignatureVerifier(settings.SLACK_SIGNING_SECRET)
+-+from src.app.core.config import settings
+-+from src.app.api.v1.reports import router as reports_router
 - 
--@@ -28,11 +27,12 @@ def create_app() -> FastAPI:
+- def create_app() -> FastAPI:
+-     app = FastAPI(
+-         title="Aftermath AI - Incident Postmortem Generator",
+--        version="0.1.0",
+--        description="AI agent that turns incident discussions + deploy logs into postmortem reports",
+-+        version="0.2.0",
+-+        description="AI agent that turns incident discussions + deploy logs into postmortem reports (Slack / Discord / Teams)",
+-     )
+- 
+-     app.add_middleware(
+-@@ -27,7 +24,7 @@ def create_app() -> FastAPI:
 -     async def health():
 -         return {"status": "ok"}
 -     
---    app.include_router(slack.router, prefix="", tags=["Slack Integration"])
--+    app.include_router(slack_router, prefix="/api/v1", tags=["Slack Integration"])
+--    app.include_router(slack_router, prefix="/api/v1", tags=["Slack Integration"])
+-+    app.include_router(reports_router, prefix="/api/v1", tags=["Integrations"])
 - 
 -     return app
 - 
--+app = create_app()
--+
-- if __name__ == "__main__":
---    app = create_app()
--     print("Starting local server at http://127.0.0.1:8000")
--     uvicorn.run(app, host="0.0.0.0", port=8000, reload=False)
--\ No newline at end of file
--diff --git a/src/ingestion/connectors/slack_connector.py b/src/ingestion/connectors/slack_connector.py
--index 5765c53..0400da2 100644
----- a/src/ingestion/connectors/slack_connector.py
--+++ b/src/ingestion/connectors/slack_connector.py
--@@ -9,11 +9,9 @@ verifier = SignatureVerifier(settings.SLACK_SIGNING_SECRET)
-- def verify_slack_signature(request: Request, body: bytes):
--     timestamp = request.headers.get("X-Slack-Request-Timestamp")
--     signature = request.headers.get("X-Slack-Signature")
---    print("Verifying signature:")
--     verified = verifier.is_valid(body, timestamp, signature)
--     if not verified:
---        print("Signature verification failed!")
---    print("Signature verified successfully!")
--+        print("Signature verification failed: Invalid signature")
-- 
-- async def retrieve_slack_chat_history(channel_id: str):
--     response = client.conversations_history(channel=channel_id)
--@@ -25,3 +23,15 @@ async def retrieve_slack_user_name(user_id: str):
-- 
-- async def send_slack_message(channel_id: str, message: str):
--     client.chat_postMessage(channel=channel_id, text=message)
--+
--+# async def get_channel_id(body: bytes):
--+#     payload = slack_parser.parse_slash_payload(body)
--+#     return payload.get("channel_id")
--+
--+# async def get_user_id(body: bytes):
--+#     payload = slack_parser.parse_slash_payload(body)
--+#     return payload.get("user_id")
--+
--+# async def get_channel_name(body: bytes):
--+#     payload = slack_parser.parse_slash_payload(body)
--+#     return payload.get("channel_name")
--\ No newline at end of file
--diff --git a/src/ingestion/parsers/slack_parser.py b/src/ingestion/parsers/slack_parser.py
--index 607057c..f408ceb 100644
----- a/src/ingestion/parsers/slack_parser.py
--+++ b/src/ingestion/parsers/slack_parser.py
--@@ -1,3 +1,4 @@
--+from typing import List
-- from urllib.parse import parse_qs
-- 
-- def parse_slash_payload(body: bytes):
--diff --git a/src/llm/__init__.py b/src/llm/__init__.py
--index 6dd0c19..e3ad45a 100644
----- a/src/llm/__init__.py
--+++ b/src/llm/__init__.py
--@@ -1 +1 @@
---from .pipeline import generate_postmortem
--+# from .pipeline import generate_postmortem
 -diff --git a/src/llm/pipeline.py b/src/llm/pipeline.py
--index f3e2cd5..0bdcac8 100644
+-index 5054273..560fb13 100644
 ---- a/src/llm/pipeline.py
 -+++ b/src/llm/pipeline.py
--@@ -1,20 +1,26 @@
-- from typing import List, Optional
---from langchain.chat_models import ChatOpenAI
--+from langchain_community.chat_models import ChatOpenAI
-- from langchain.schema import AIMessage, HumanMessage, SystemMessage
-- from langchain.tools import Tool
-- from langchain.agents import initialize_agent, AgentType
---import asyncio
-- 
---from src.ingestion.connectors.slack_connector import retrieve_slack_chat_history, retrieve_slack_user_name
--+from src.app.core.config import settings
--+from src.app.core.models import Incident
--+
--+OPENAI_API_KEY = settings.OPENAI_API_KEY
-- 
-- class ModelClient:
--     def __init__(self, provider: str = "openai", model_name: str = "gpt-5-postmortem"):
--         self.provider = provider
--         self.model_name = model_name
---        self.client = ChatOpenAI(model=model_name, temperature=0.3)
--+        self.client = ChatOpenAI(
--+            model=model_name,
--+            temperature=0.3,
--+            openai_api_key=OPENAI_API_KEY
--+        )
-- 
--     @classmethod
---    def select(cls, provider: str = "openai", model_name: str = "gpt-5-postmortem") -> "ModelClient":
--+    def select(cls, provider: str = "openai", model_name: str = "gpt-4o") -> "ModelClient":
--         return cls(provider, model_name)
-- 
--     def generate(self, messages: List[dict]) -> str:
--@@ -27,16 +33,19 @@ class ModelClient:
+-@@ -33,7 +33,6 @@ class ModelClient:
 -         response = self.client(lc_msgs)
 -         return response.content
 - 
--+
+--
 - POSTMORTEM_TEMPLATE = """
 - You are a senior SRE generating an incident postmortem.
--+
-- Context:
-- {{context}}
 - 
-- Instructions:
+-@@ -44,7 +43,7 @@ Instructions:
 - - Deliver a structured postmortem with clear root cause
---- Timeline must be explicit
---- No filler phrases
---- Cite sources (slack/github/deploy-log) inline
--+- Timeline must be explicit (chronological)
--+- No filler language
--+- Cite message sources inline using user_id
--+- Everything MUST come from the provided incident context
+- - Timeline must be explicit (chronological)
+- - No filler language
+--- Cite message sources inline using user_id
+-+- Cite message sources inline using user_id and source (e.g. user123@slack)
+- - Everything MUST come from the provided incident context
 - 
 - Output format:
-- 1. Summary
--@@ -45,41 +54,58 @@ Output format:
-- 4. Root Cause
-- 5. Remediations
+-@@ -56,7 +55,6 @@ Output format:
 - 6. Follow-ups
---"""
--+""".strip()
--+
+- """.strip()
 - 
+--
 - class AgentState(dict):
 -     def __init__(self, **kwargs):
 -         super().__init__(**kwargs)
---        self.setdefault("context", {})
--+        self.setdefault("incident", None)
+-@@ -64,30 +62,33 @@ class AgentState(dict):
 -         self.setdefault("postmortem", None)
--+        self.setdefault("valid", False)
--+
--+
--+def build_slack_context(incident: Incident) -> str:
--+    """Format the Slack conversation as `user_id: message` per line."""
--+    lines = []
--+    for msg in incident.conversation:
--+        # No username here — exactly what you asked for
--+        lines.append(f"{msg.user_id}: {msg.text}")
--+    return "\n".join(lines)
--+
--+
--+def slack_tool_func(state: AgentState) -> str:
--+    """Actual implementation of Slack tool that reads from Incident."""
--+    incident: Incident = state["incident"]
--+    return build_slack_context(incident)
+-         self.setdefault("valid", False)
 - 
---def fetch_slack_context(incident_id: str) -> str:
---    return f"Slack discussion snippet for {incident_id}"
+--
+--def build_slack_context(incident: Incident) -> str:
+--    """Format the Slack conversation as `user_id: message` per line."""
+-+def build_multi_source_context(incident: Incident) -> str:
+-+    """
+-+    Format messages with source tags:
+-+      [slack] U123: message
+-+      [discord] 98765: message
+-+      [teams] S-1: message
+-+    """
+-     lines = []
+-     for msg in incident.conversation:
+--        lines.append(f"{msg.user_id}: {msg.text}")
+-+        source = msg.source or incident.source or "unknown"
+-+        lines.append(f"[{source}] {msg.user_id}: {msg.text}")
+-     return "\n".join(lines)
 - 
+--
+- def slack_tool_func(state: AgentState) -> str:
+--    """Actual implementation of Slack tool that reads from Incident."""
+-+    """Return formatted context (keeps compatibility with existing tools)"""
+-     incident: Incident = state["incident"]
+--    return build_slack_context(incident)
+--
+-+    return build_multi_source_context(incident)
+- 
+-+# Tools (kept generic — they consume the incident state)
 - slack_tool = Tool(
---    name="Slack",
---    func=fetch_slack_context,
---    description="Fetch relevant Slack messages for an incident"
--+    name="SlackContext",
--+    func=lambda incident_id_or_state: slack_tool_func(incident_id_or_state),
--+    description="Returns previously ingested Slack messages for this incident.",
+--    name="SlackContext",
+--    func=lambda incident_id_or_state: slack_tool_func(incident_id_or_state),
+--    description="Returns previously ingested Slack messages for this incident.",
+-+    name="ConversationContext",
+-+    func=lambda incident_state: slack_tool_func(incident_state),
+-+    description="Returns previously ingested messages for this incident from any source (Slack/Discord/Teams).",
 - )
 - 
 - TOOLS = [slack_tool]
 - 
--+
+--
 - def synthesize_postmortem(state: AgentState, model: ModelClient):
 -     llm_agent = initialize_agent(
 -         tools=TOOLS,
--         llm=model.client,
---        agent=AgentType.CHAT_CONVERSATIONAL_REACT_DESCRIPTION,
--+        agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
--         verbose=False
+-@@ -97,14 +98,13 @@ def synthesize_postmortem(state: AgentState, model: ModelClient):
 -     )
 - 
---    prompt = POSTMORTEM_TEMPLATE.replace(
---        "{{context}}",
---        f"Incident ID: {state.get('incident_id')}\nPlease fetch Slack/GitHub/deploy logs as needed."
---    )
--+    incident: Incident = state["incident"]
--+    context = build_slack_context(incident)
--+
--+    prompt = POSTMORTEM_TEMPLATE.replace("{{context}}", context)
+-     incident: Incident = state["incident"]
+--    context = build_slack_context(incident)
+-+    context = build_multi_source_context(incident)
+- 
+-     prompt = POSTMORTEM_TEMPLATE.replace("{{context}}", context)
 - 
 -     state["postmortem"] = llm_agent.run(prompt)
 -     return state
 - 
--+
+--
 - def validate_postmortem(state: AgentState, model: ModelClient):
 -     check_query = f"Is the following postmortem complete and properly formatted? Respond YES or NO.\n\n{state['postmortem']}"
 -     res = model.generate([
--@@ -89,18 +115,20 @@ def validate_postmortem(state: AgentState, model: ModelClient):
+-@@ -114,23 +114,12 @@ def validate_postmortem(state: AgentState, model: ModelClient):
 -     state["valid"] = "YES" in res.upper()
 -     return state
 - 
--+
+--
 - class PostmortemAgent:
 -     def __init__(self, model_client: Optional[ModelClient] = None):
 -         self.model = model_client or ModelClient.select()
 - 
---    def run(self, incident_id: str, initial_context: dict) -> str:
---        state = AgentState(incident_id=incident_id, context=initial_context)
--+    def run(self, incident: Incident) -> str:
--+        state = AgentState(incident=incident)
-- 
+-     def run(self, incident: Incident) -> str:
+-         state = AgentState(incident=incident)
+--
 -         state = synthesize_postmortem(state, self.model)
 -         state = validate_postmortem(state, self.model)
-- 
--         return state.get("postmortem", "No output generated.")
-- 
--+
-- __all__ = [
--     "ModelClient",
--     "PostmortemAgent",
+--
+--        return state.get("postmortem", "No output generated.")
+--
+--
+--__all__ = [
+--    "ModelClient",
+--    "PostmortemAgent",
+--    "POSTMORTEM_TEMPLATE",
+--    "AgentState",
+--]
+-\ No newline at end of file
+-+        return state.get("postmortem", "No output generated.")
+-\ No newline at end of file
 diff --git a/src/app/api/v1/reports.py b/src/app/api/v1/reports.py
-index 71779b9..143464b 100644
+index 143464b..7212f7c 100644
 --- a/src/app/api/v1/reports.py
 +++ b/src/app/api/v1/reports.py
-@@ -1,18 +1,29 @@
- from datetime import datetime
- from typing import List, Optional
--import asyncio
- import uuid
- 
- from fastapi import APIRouter, Request, BackgroundTasks
--from fastapi.responses import PlainTextResponse
-+from fastapi.responses import PlainTextResponse, JSONResponse
- 
- from src.app.core.models import Incident, Message
--from src.ingestion.parsers import slack_parser
-+from src.ingestion.parsers import slack_parser, discord_parser, teams_parser
- from src.ingestion.connectors.slack_connector import (
--    verify_slack_signature, 
--    send_slack_message, 
--    retrieve_slack_chat_history, 
--    retrieve_slack_user_name
-+    verify_slack_signature,
-+    retrieve_slack_chat_history,
-+    retrieve_slack_user_name,
-+    send_slack_message,
-+)
-+from src.ingestion.connectors.discord_connector import (
-+    verify_discord_signature,
-+    retrieve_discord_chat_history,
-+    retrieve_discord_user_name,
-+    send_discord_message,
-+)
-+from src.ingestion.connectors.teams_connector import (
-+    verify_teams_request,
-+    retrieve_teams_chat_history,
-+    retrieve_teams_user_name,
-+    send_teams_message,
+@@ -25,6 +25,8 @@ from src.ingestion.connectors.teams_connector import (
+     retrieve_teams_user_name,
+     send_teams_message,
  )
++from src.ingestion.connectors.github_connector import get_latest_github_action_logs
++from src.ingestion.connectors.jenkins_connector import get_latest_jenkins_build_log
  from src.llm.pipeline import PostmortemAgent
  
-@@ -22,15 +33,18 @@ async def generate_and_send_postmortem(incident: Incident):
-     agent = PostmortemAgent()
-     postmortem = agent.run(incident)
+ router = APIRouter()
+@@ -42,6 +44,26 @@ async def generate_and_send_postmortem(incident: Incident):
+     else:
+         print("Unknown incident source; no outbound message sent.")
  
--    await send_slack_message(
--        incident.channel_id, 
--        f"*Postmortem for incident `{incident.incident_id}`:*\n\n{postmortem}"
--    )
-+    if incident.source == "slack":
-+        await send_slack_message(incident.channel_id, f"*Postmortem for incident `{incident.incident_id}`:*\n\n{postmortem}")
-+    elif incident.source == "discord":
-+        await send_discord_message(incident.channel_id, f"**Postmortem for incident `{incident.incident_id}`**\n\n{postmortem}")
-+    elif incident.source == "teams":
-+        await send_teams_message(incident.channel_id, f"**Postmortem for incident `{incident.incident_id}`**\n\n{postmortem}")
-+    else:
-+        print("Unknown incident source; no outbound message sent.")
- 
++async def fetch_all_deployment_logs() -> Optional[str]:
++    log_parts = []
++    
++    print("Fetching deployment logs...")
++    github_logs = await get_latest_github_action_logs()
++    if github_logs:
++        print(f"Successfully fetched {len(github_logs)} chars from GitHub.")
++        log_parts.append(f"--- GITHUB ACTION LOGS ---\n{github_logs}")
++
++    jenkins_logs = await get_latest_jenkins_build_log()
++    if jenkins_logs:
++        print(f"Successfully fetched {len(jenkins_logs)} chars from Jenkins.")
++        log_parts.append(f"--- JENKINS BUILD LOGS ---\n{jenkins_logs}")
++
++    if not log_parts:
++        print("No deployment logs fetched.")
++        return None
++        
++    return "\n\n".join(log_parts)
++
  @router.post("/slack")
  async def handle_slack_command(request: Request, background_tasks: BackgroundTasks):
      body: bytes = await request.body()
--
-     verify_slack_signature(request, body)
-     payload = slack_parser.parse_slash_payload(body)
- 
-@@ -44,10 +58,11 @@ async def handle_slack_command(request: Request, background_tasks: BackgroundTas
-     for msg in messages:
-         conversation.append(
-             Message(
--                user_id=msg["user"],
--                username=await retrieve_slack_user_name(user_id) or "Unknown",
--                text=msg["text"],
--                timestamp=datetime.fromtimestamp(float(msg["ts"]))
-+                user_id=msg.get("user","unknown"),
-+                username=await retrieve_slack_user_name(msg.get("user")) or "Unknown",
-+                text=msg.get("text",""),
-+                timestamp=datetime.fromtimestamp(float(msg.get("ts", 0))),
-+                source="slack"
+@@ -65,6 +87,8 @@ async def handle_slack_command(request: Request, background_tasks: BackgroundTas
+                 source="slack"
              )
          )
++    
++    deployment_logs = await fetch_all_deployment_logs()
  
-@@ -57,9 +72,100 @@ async def handle_slack_command(request: Request, background_tasks: BackgroundTas
-         triggered_by_user_id=user_id,
+     incident = Incident(
+         incident_id=str(uuid.uuid4()),
+@@ -73,12 +97,13 @@ async def handle_slack_command(request: Request, background_tasks: BackgroundTas
          triggered_by_user_name=user_name,
          channel_name=channel_name,
--        conversation=conversation
-+        conversation=conversation,
-+        source="slack",
-+        trigger_platform="slack_slash"
+         conversation=conversation,
++        deployment_logs=deployment_logs,
+         source="slack",
+         trigger_platform="slack_slash"
      )
  
      background_tasks.add_task(generate_and_send_postmortem, incident)
-+    return PlainTextResponse("Generating postmortem...", status_code=200)
-+
-+@router.post("/discord")
-+async def handle_discord_interaction(request: Request, background_tasks: BackgroundTasks):
-+    body: bytes = await request.body()
-+
-+    verify_discord_signature(request, body)
-+
-+    payload = await request.json()
-+    parsed = discord_parser.parse_interaction_payload(payload)
-+
-+    channel_id = parsed.get("channel_id")
-+    user_id = parsed.get("user_id")
-+    user_name = await retrieve_discord_user_name(user_id)
-+    channel_name = parsed.get("channel_name")
-+
-+    messages = await retrieve_discord_chat_history(channel_id)
-+    conversation: List[Message] = []
-+    for msg in messages:
-+        conversation.append(
-+            Message(
-+                user_id=msg.get("author", {}).get("id", "unknown"),
-+                username=msg.get("author", {}).get("username") or "Unknown",
-+                text=msg.get("content", ""),
-+                timestamp=datetime.fromtimestamp(float(msg.get("timestamp", datetime.utcnow().timestamp()))),
-+                source="discord"
-+            )
-+        )
+-    return PlainTextResponse("Generating postmortem...", status_code=200)
++    return PlainTextResponse("Generating postmortem (including deployment logs)...", status_code=200)
  
-+    incident = Incident(
-+        incident_id=str(uuid.uuid4()),
-+        channel_id=channel_id,
-+        triggered_by_user_id=user_id,
-+        triggered_by_user_name=user_name,
-+        channel_name=channel_name,
-+        conversation=conversation,
-+        source="discord",
-+        trigger_platform=parsed.get("trigger_platform", "discord_interaction")
-+    )
+ @router.post("/discord")
+ async def handle_discord_interaction(request: Request, background_tasks: BackgroundTasks):
+@@ -107,6 +132,8 @@ async def handle_discord_interaction(request: Request, background_tasks: Backgro
+             )
+         )
+ 
++    deployment_logs = await fetch_all_deployment_logs()
 +
-+    background_tasks.add_task(generate_and_send_postmortem, incident)
-+    return JSONResponse({"type": 200, "message": "Postmortem generation started."})
+     incident = Incident(
+         incident_id=str(uuid.uuid4()),
+         channel_id=channel_id,
+@@ -114,23 +141,16 @@ async def handle_discord_interaction(request: Request, background_tasks: Backgro
+         triggered_by_user_name=user_name,
+         channel_name=channel_name,
+         conversation=conversation,
++        deployment_logs=deployment_logs,
+         source="discord",
+         trigger_platform=parsed.get("trigger_platform", "discord_interaction")
+     )
+ 
+     background_tasks.add_task(generate_and_send_postmortem, incident)
+-    return JSONResponse({"type": 200, "message": "Postmortem generation started."})
++    return JSONResponse({"type": 200, "message": "Postmortem generation (including deployment logs) started."})
+ 
+ @router.post("/teams")
+ async def handle_teams_trigger(request: Request, background_tasks: BackgroundTasks):
+-    """
+-    Endpoint that accepts triggers from multiple Platforms:
+-      - teams:channel_message (Graph webhook)
+-      - teams:incoming_webhook
+-      - teams:adaptive_card (action)
+-      - power_automate
+-    The payload should include enough context (channelId or conversationId). Parsers attempt to normalize common Teams payloads.
+-    """
+     body: bytes = await request.body()
+     json_payload = await request.json()
+ 
+@@ -156,6 +176,8 @@ async def handle_teams_trigger(request: Request, background_tasks: BackgroundTas
+             )
+         )
+ 
++    deployment_logs = await fetch_all_deployment_logs()
 +
-+@router.post("/teams")
-+async def handle_teams_trigger(request: Request, background_tasks: BackgroundTasks):
-+    """
-+    Endpoint that accepts triggers from multiple Platforms:
-+      - teams:channel_message (Graph webhook)
-+      - teams:incoming_webhook
-+      - teams:adaptive_card (action)
-+      - power_automate
-+    The payload should include enough context (channelId or conversationId). Parsers attempt to normalize common Teams payloads.
-+    """
-+    body: bytes = await request.body()
-+    json_payload = await request.json()
-+
-+    verify_teams_request(request, body)
-+
-+    parsed = teams_parser.parse_trigger_payload(json_payload)
-+    channel_id = parsed.get("channel_id")
-+    user_id = parsed.get("user_id")
-+    user_name = await retrieve_teams_user_name(user_id)
-+    channel_name = parsed.get("channel_name")
-+    trigger_platform = parsed.get("trigger_platform", "teams_webhook")
-+
-+    messages = await retrieve_teams_chat_history(channel_id)
-+    conversation: List[Message] = []
-+    for msg in messages:
-+        conversation.append(
-+            Message(
-+                user_id=msg.get("from", {}).get("user", {}).get("id", "unknown"),
-+                username=msg.get("from", {}).get("user", {}).get("displayName") or "Unknown",
-+                text=msg.get("body", {}).get("content", ""),
-+                timestamp=datetime.fromtimestamp(float(msg.get("createdDateTime", datetime.utcnow().timestamp()))),
-+                source="teams"
-+            )
-+        )
-+
-+    incident = Incident(
-+        incident_id=str(uuid.uuid4()),
-+        channel_id=channel_id,
-+        triggered_by_user_id=user_id,
-+        triggered_by_user_name=user_name,
-+        channel_name=channel_name,
-+        conversation=conversation,
-+        source="teams",
-+        trigger_platform=trigger_platform
-+    )
-+
-+    background_tasks.add_task(generate_and_send_postmortem, incident)
-     return PlainTextResponse("Generating postmortem...", status_code=200)
+     incident = Incident(
+         incident_id=str(uuid.uuid4()),
+         channel_id=channel_id,
+@@ -163,9 +185,10 @@ async def handle_teams_trigger(request: Request, background_tasks: BackgroundTas
+         triggered_by_user_name=user_name,
+         channel_name=channel_name,
+         conversation=conversation,
++        deployment_logs=deployment_logs,
+         source="teams",
+         trigger_platform=trigger_platform
+     )
+ 
+     background_tasks.add_task(generate_and_send_postmortem, incident)
+-    return PlainTextResponse("Generating postmortem...", status_code=200)
++    return PlainTextResponse("Generating postmortem...", status_code=200)
+\ No newline at end of file
 diff --git a/src/app/core/config.py b/src/app/core/config.py
-index fc12539..fd56c02 100644
+index fd56c02..f52767f 100644
 --- a/src/app/core/config.py
 +++ b/src/app/core/config.py
-@@ -7,6 +7,12 @@ class Settings(BaseSettings):
-     CORS_ORIGINS: list[str] = ["*"]
-     ENV: str = "development"
+@@ -1,4 +1,5 @@
+ from pydantic_settings import BaseSettings
++from typing import Optional
  
-+    DISCORD_TOKEN: str
-+    DISCORD_PUBLIC_KEY: str
-+    TEAMS_CLIENT_ID: str
-+    TEAMS_CLIENT_SECRET: str
-+    TEAMS_TENANT_ID: str
-+    TEAMS_GRAPH_TOKEN: str
+ class Settings(BaseSettings):
+     SLACK_TOKEN: str
+@@ -13,7 +14,15 @@ class Settings(BaseSettings):
+     TEAMS_CLIENT_SECRET: str
+     TEAMS_TENANT_ID: str
+     TEAMS_GRAPH_TOKEN: str
++
++    GITHUB_TOKEN: Optional[str] = None
++    GITHUB_REPO: Optional[str] = None
++    JENKINS_URL: Optional[str] = None
++    JENKINS_USERNAME: Optional[str] = None
++    JENKINS_TOKEN: Optional[str] = None
++    JENKINS_JOB_NAME: Optional[str] = None
++
      class Config:
          env_file = ".env"
  
+-settings = Settings()
++settings = Settings()
+\ No newline at end of file
 diff --git a/src/app/core/models.py b/src/app/core/models.py
-index 453ef36..d8613ee 100644
+index d8613ee..ae85f0e 100644
 --- a/src/app/core/models.py
 +++ b/src/app/core/models.py
-@@ -1,5 +1,5 @@
- from pydantic import BaseModel
--from typing import List
-+from typing import List, Optional
- from datetime import datetime
- 
- class Message(BaseModel):
-@@ -7,11 +7,14 @@ class Message(BaseModel):
-     username: str
-     text: str
-     timestamp: datetime
-+    source: Optional[str] = None
- 
--class Incident(BaseModel):         
-+class Incident(BaseModel):
-     incident_id: str
-     channel_id: str
-     triggered_by_user_id: str
-     triggered_by_user_name: str
-     channel_name: str
--    conversation: List[Message]
+@@ -18,3 +18,4 @@ class Incident(BaseModel):
+     conversation: List[Message]
+     source: Optional[str] = "slack"
+     trigger_platform: Optional[str] = None
++    deployment_logs: Optional[str] = None
 \ No newline at end of file
-+    conversation: List[Message]
-+    source: Optional[str] = "slack"
-+    trigger_platform: Optional[str] = None
-diff --git a/src/app/main.py b/src/app/main.py
-index f944f8f..da2d36a 100644
---- a/src/app/main.py
-+++ b/src/app/main.py
-@@ -1,18 +1,15 @@
--from fastapi import FastAPI, Request, BackgroundTasks, HTTPException
-+from fastapi import FastAPI
- from fastapi.middleware.cors import CORSMiddleware
--from fastapi.responses import JSONResponse
--from slack_sdk.signature import SignatureVerifier
- import uvicorn
+diff --git a/src/ingestion/connectors/discord_connectors.py b/src/ingestion/connectors/discord_connectors.py
+deleted file mode 100644
+index 6fbce09..0000000
+--- a/src/ingestion/connectors/discord_connectors.py
++++ /dev/null
+@@ -1,47 +0,0 @@
+-import os
+-import time
+-import requests
+-from fastapi import Request
 -from src.app.core.config import settings
--from src.app.api.v1.reports import router as slack_router
- 
--verifier = SignatureVerifier(settings.SLACK_SIGNING_SECRET)
-+from src.app.core.config import settings
-+from src.app.api.v1.reports import router as reports_router
- 
- def create_app() -> FastAPI:
-     app = FastAPI(
-         title="Aftermath AI - Incident Postmortem Generator",
--        version="0.1.0",
--        description="AI agent that turns incident discussions + deploy logs into postmortem reports",
-+        version="0.2.0",
-+        description="AI agent that turns incident discussions + deploy logs into postmortem reports (Slack / Discord / Teams)",
-     )
- 
-     app.add_middleware(
-@@ -27,7 +24,7 @@ def create_app() -> FastAPI:
-     async def health():
-         return {"status": "ok"}
-     
--    app.include_router(slack_router, prefix="/api/v1", tags=["Slack Integration"])
-+    app.include_router(reports_router, prefix="/api/v1", tags=["Integrations"])
- 
-     return app
- 
+-
+-DISCORD_TOKEN = os.environ.get("DISCORD_TOKEN", "")
+-DISCORD_PUBLIC_KEY = os.environ.get("DISCORD_PUBLIC_KEY", "")
+-
+-BASE = "https://discord.com/api/v10"
+-
+-def verify_discord_signature(request: Request, body: bytes):
+-    """
+-    Discord interaction signature verification.
+-    In production: verify using Ed25519 (X-Signature-Ed25519 & X-Signature-Timestamp).
+-    Here: placeholder that simply logs. Replace with nacl library verification.
+-    """
+-    ts = request.headers.get("X-Signature-Timestamp")
+-    sig = request.headers.get("X-Signature-Ed25519")
+-    if not ts or not sig:
+-        print("Discord signature missing - implement verification.")
+-    return True
+-
+-async def retrieve_discord_chat_history(channel_id: str):
+-    """Return a list of messages from a Discord channel. Requires bot token & channel permissions."""
+-    url = f"{BASE}/channels/{channel_id}/messages?limit=200"
+-    headers = {"Authorization": f"Bot {DISCORD_TOKEN}"}
+-    resp = requests.get(url, headers=headers)
+-    resp.raise_for_status()
+-    return resp.json()
+-
+-async def retrieve_discord_user_name(user_id: str):
+-    url = f"{BASE}/users/{user_id}"
+-    headers = {"Authorization": f"Bot {DISCORD_TOKEN}"}
+-    resp = requests.get(url, headers=headers)
+-    if resp.status_code != 200:
+-        return "Unknown"
+-    data = resp.json()
+-    return data.get("username")
+-
+-async def send_discord_message(channel_id: str, message: str):
+-    url = f"{BASE}/channels/{channel_id}/messages"
+-    headers = {"Authorization": f"Bot {DISCORD_TOKEN}", "Content-Type": "application/json"}
+-    payload = {"content": message}
+-    resp = requests.post(url, headers=headers, json=payload)
+-    resp.raise_for_status()
+-    return resp.json()
 diff --git a/src/llm/pipeline.py b/src/llm/pipeline.py
-index 5054273..560fb13 100644
+index 560fb13..d68a0dd 100644
 --- a/src/llm/pipeline.py
 +++ b/src/llm/pipeline.py
-@@ -33,7 +33,6 @@ class ModelClient:
-         response = self.client(lc_msgs)
-         return response.content
+@@ -8,9 +8,10 @@ from src.app.core.config import settings
+ from src.app.core.models import Incident
  
--
- POSTMORTEM_TEMPLATE = """
- You are a senior SRE generating an incident postmortem.
+ OPENAI_API_KEY = settings.OPENAI_API_KEY
++LOG_LENGTH_LIMIT = 10000 
  
-@@ -44,7 +43,7 @@ Instructions:
- - Deliver a structured postmortem with clear root cause
+ class ModelClient:
+-    def __init__(self, provider: str = "openai", model_name: str = "gpt-5-postmortem"):
++    def __init__(self, provider: str = "openai", model_name: str = None):
+         self.provider = provider
+         self.model_name = model_name
+         self.client = ChatOpenAI(
+@@ -44,7 +45,7 @@ Instructions:
  - Timeline must be explicit (chronological)
  - No filler language
--- Cite message sources inline using user_id
-+- Cite message sources inline using user_id and source (e.g. user123@slack)
- - Everything MUST come from the provided incident context
+ - Cite message sources inline using user_id and source (e.g. user123@slack)
+-- Everything MUST come from the provided incident context
++- Everything MUST come from the provided incident context (conversation and deployment logs)
  
  Output format:
-@@ -56,7 +55,6 @@ Output format:
- 6. Follow-ups
- """.strip()
- 
--
- class AgentState(dict):
-     def __init__(self, **kwargs):
-         super().__init__(**kwargs)
-@@ -64,30 +62,33 @@ class AgentState(dict):
-         self.setdefault("postmortem", None)
-         self.setdefault("valid", False)
- 
--
--def build_slack_context(incident: Incident) -> str:
--    """Format the Slack conversation as `user_id: message` per line."""
-+def build_multi_source_context(incident: Incident) -> str:
-+    """
-+    Format messages with source tags:
-+      [slack] U123: message
-+      [discord] 98765: message
-+      [teams] S-1: message
-+    """
-     lines = []
-     for msg in incident.conversation:
--        lines.append(f"{msg.user_id}: {msg.text}")
-+        source = msg.source or incident.source or "unknown"
-+        lines.append(f"[{source}] {msg.user_id}: {msg.text}")
-     return "\n".join(lines)
- 
--
- def slack_tool_func(state: AgentState) -> str:
--    """Actual implementation of Slack tool that reads from Incident."""
-+    """Return formatted context (keeps compatibility with existing tools)"""
+ 1. Summary
+@@ -80,7 +81,6 @@ def slack_tool_func(state: AgentState) -> str:
      incident: Incident = state["incident"]
--    return build_slack_context(incident)
--
-+    return build_multi_source_context(incident)
+     return build_multi_source_context(incident)
  
-+# Tools (kept generic — they consume the incident state)
+-# Tools (kept generic — they consume the incident state)
  slack_tool = Tool(
--    name="SlackContext",
--    func=lambda incident_id_or_state: slack_tool_func(incident_id_or_state),
--    description="Returns previously ingested Slack messages for this incident.",
-+    name="ConversationContext",
-+    func=lambda incident_state: slack_tool_func(incident_state),
-+    description="Returns previously ingested messages for this incident from any source (Slack/Discord/Teams).",
- )
+     name="ConversationContext",
+     func=lambda incident_state: slack_tool_func(incident_state),
+@@ -89,6 +89,24 @@ slack_tool = Tool(
  
  TOOLS = [slack_tool]
  
--
++def summarize_logs(logs: str, model_client: ModelClient) -> str:
++    print(f"Summarizing {len(logs)} chars of log data...")
++    SUMMARIZE_PROMPT = """
++    You are a log summarization bot. Summarize the following deployment logs.
++    Focus *only* on errors, warnings, failures, and key success markers (e.g., "deployment successful", "service started").
++    Be very concise and use bullet points for key findings.
++    """.strip()
++    
++    try:
++        summary = model_client.generate([
++            {"role": "system", "content": SUMMARIZE_PROMPT},
++            {"role": "user", "content": logs},
++        ])
++        return f"--- LOG SUMMARY ---\n{summary}\n--- END OF SUMMARY ---"
++    except Exception as e:
++        print(f"Failed to summarize logs: {e}. Truncating instead.")
++        return logs[:LOG_LENGTH_LIMIT] # Fallback to truncation
++
  def synthesize_postmortem(state: AgentState, model: ModelClient):
      llm_agent = initialize_agent(
          tools=TOOLS,
-@@ -97,14 +98,13 @@ def synthesize_postmortem(state: AgentState, model: ModelClient):
+@@ -98,8 +116,20 @@ def synthesize_postmortem(state: AgentState, model: ModelClient):
      )
  
      incident: Incident = state["incident"]
--    context = build_slack_context(incident)
-+    context = build_multi_source_context(incident)
- 
+-    context = build_multi_source_context(incident)
+-
++    
++    conversation_context = build_multi_source_context(incident)
++    full_context = [conversation_context]
++    
++    deployment_logs = incident.deployment_logs
++    
++    if deployment_logs:
++        if len(deployment_logs) > LOG_LENGTH_LIMIT:
++            print(f"Deployment logs exceed {LOG_LENGTH_LIMIT} chars, summarizing...")
++            deployment_logs = summarize_logs(deployment_logs, model)
++        
++        full_context.append(f"\n\n--- DEPLOYMENT LOGS ---\n{deployment_logs}")
++
++    context = "\n".join(full_context)
      prompt = POSTMORTEM_TEMPLATE.replace("{{context}}", context)
  
      state["postmortem"] = llm_agent.run(prompt)
-     return state
- 
--
- def validate_postmortem(state: AgentState, model: ModelClient):
-     check_query = f"Is the following postmortem complete and properly formatted? Respond YES or NO.\n\n{state['postmortem']}"
-     res = model.generate([
-@@ -114,23 +114,12 @@ def validate_postmortem(state: AgentState, model: ModelClient):
-     state["valid"] = "YES" in res.upper()
-     return state
- 
--
- class PostmortemAgent:
-     def __init__(self, model_client: Optional[ModelClient] = None):
-         self.model = model_client or ModelClient.select()
- 
-     def run(self, incident: Incident) -> str:
-         state = AgentState(incident=incident)
--
-         state = synthesize_postmortem(state, self.model)
-         state = validate_postmortem(state, self.model)
--
--        return state.get("postmortem", "No output generated.")
--
--
--__all__ = [
--    "ModelClient",
--    "PostmortemAgent",
--    "POSTMORTEM_TEMPLATE",
--    "AgentState",
--]
-\ No newline at end of file
-+        return state.get("postmortem", "No output generated.")
-\ No newline at end of file

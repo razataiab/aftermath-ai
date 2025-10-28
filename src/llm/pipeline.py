@@ -8,9 +8,10 @@ from src.app.core.config import settings
 from src.app.core.models import Incident
 
 OPENAI_API_KEY = settings.OPENAI_API_KEY
+LOG_LENGTH_LIMIT = 10000 
 
 class ModelClient:
-    def __init__(self, provider: str = "openai", model_name: str = "gpt-5-postmortem"):
+    def __init__(self, provider: str = "openai", model_name: str = None):
         self.provider = provider
         self.model_name = model_name
         self.client = ChatOpenAI(
@@ -44,7 +45,7 @@ Instructions:
 - Timeline must be explicit (chronological)
 - No filler language
 - Cite message sources inline using user_id and source (e.g. user123@slack)
-- Everything MUST come from the provided incident context
+- Everything MUST come from the provided incident context (conversation and deployment logs)
 
 Output format:
 1. Summary
@@ -80,7 +81,6 @@ def slack_tool_func(state: AgentState) -> str:
     incident: Incident = state["incident"]
     return build_multi_source_context(incident)
 
-# Tools (kept generic — they consume the incident state)
 slack_tool = Tool(
     name="ConversationContext",
     func=lambda incident_state: slack_tool_func(incident_state),
@@ -88,6 +88,24 @@ slack_tool = Tool(
 )
 
 TOOLS = [slack_tool]
+
+def summarize_logs(logs: str, model_client: ModelClient) -> str:
+    print(f"Summarizing {len(logs)} chars of log data...")
+    SUMMARIZE_PROMPT = """
+    You are a log summarization bot. Summarize the following deployment logs.
+    Focus *only* on errors, warnings, failures, and key success markers (e.g., "deployment successful", "service started").
+    Be very concise and use bullet points for key findings.
+    """.strip()
+    
+    try:
+        summary = model_client.generate([
+            {"role": "system", "content": SUMMARIZE_PROMPT},
+            {"role": "user", "content": logs},
+        ])
+        return f"--- LOG SUMMARY ---\n{summary}\n--- END OF SUMMARY ---"
+    except Exception as e:
+        print(f"Failed to summarize logs: {e}. Truncating instead.")
+        return logs[:LOG_LENGTH_LIMIT] # Fallback to truncation
 
 def synthesize_postmortem(state: AgentState, model: ModelClient):
     llm_agent = initialize_agent(
@@ -98,8 +116,20 @@ def synthesize_postmortem(state: AgentState, model: ModelClient):
     )
 
     incident: Incident = state["incident"]
-    context = build_multi_source_context(incident)
+    
+    conversation_context = build_multi_source_context(incident)
+    full_context = [conversation_context]
+    
+    deployment_logs = incident.deployment_logs
+    
+    if deployment_logs:
+        if len(deployment_logs) > LOG_LENGTH_LIMIT:
+            print(f"Deployment logs exceed {LOG_LENGTH_LIMIT} chars, summarizing...")
+            deployment_logs = summarize_logs(deployment_logs, model)
+        
+        full_context.append(f"\n\n--- DEPLOYMENT LOGS ---\n{deployment_logs}")
 
+    context = "\n".join(full_context)
     prompt = POSTMORTEM_TEMPLATE.replace("{{context}}", context)
 
     state["postmortem"] = llm_agent.run(prompt)
